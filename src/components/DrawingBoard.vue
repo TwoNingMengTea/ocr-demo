@@ -1,0 +1,442 @@
+<template>
+  <div class="canvas-container">
+    <!--  基础画布  -->
+    <canvas id="basicCanvas"></canvas>
+    <!--  原始画布  -->
+    <canvas id="originCanvas" v-show="false"></canvas>
+    <!--  用于将裁剪区域二进制数据转换成base64  -->
+    <canvas id="transCanvas" v-show="false"></canvas>
+    <div id="menu" v-if="menuParam.isShow" :style="{left: menuParam.left, top: menuParam.top}">
+      <span id="yes" @click="handleOCR">识别</span> |
+      <span id="no" @click="cancelCurrentOCRArea">取消</span>
+    </div>
+  </div>
+</template>
+
+<script>
+export default {
+  name: 'DrawingBoard',
+  props: {
+    // ocr类型：通用文字识别、表格识别
+    ocrType: {
+      type: String,
+      default: 'common'
+    },
+    // 图片路径
+    basicImgSrc: {
+      type: String,
+      isRequired: true
+    },
+    // ocr接口请求函数
+    fetchGeneralOCR: {
+      type: Function,
+      isRequired: true
+    },
+    // 展示画布的最大宽度
+    maxBasicCanvasW: {
+      type: Number,
+      default: 800
+    },
+    // 展示画布的最大高度
+    maxBasicCanvasH: {
+      type: Number,
+      default: 900
+    }
+  },
+  data() {
+    return {
+      // 当前展示的画布
+      canvas: null,
+      ctx: null,
+
+      // 原始Canvas，根据图像原始大小进行绘制
+      originCanvas: null,
+      originCanvasCtx: null,
+
+      // 中转Canvas，用于将 Canvas ImageData 转换成 base64
+      transCanvas: null,
+      transCanvasCtx: null,
+
+      // 缩放比例
+      canvasScaleRatio: 1,
+
+      // 初始图片
+      // 对象
+      basicImg: null,
+      // 大小
+      basicImgSize: [0, 0],
+      // 二进制数据
+      originalBasicImgData: null,
+      // 是否可以开始 "画" 识别区域
+      canSetArea: false,
+
+      // 当前识别区域
+      // 起始坐标
+      originPos: [0, 0],
+      // 大小
+      areaSize: [0, 0],
+      // key count
+      ocrClipKeyCount: 1000,
+      // 区域集合，[{ key, x, y, width, height }]
+      ocrImgStack: [],
+      ocrImgBase64Map: {},
+
+      // 最近一次画布的渲染结果
+      latestCanvasBackUp: null,
+      // 菜单选项
+      menuParam: {
+        isShow: false,
+        left: 0,
+        top: 0
+      },
+
+      // 裁剪区域最小宽高值
+      miniBoundary: 5,
+      isOcrLockIn: true,
+
+      // 表格数据Col，Y方向上可接受的最小误差
+      miniColPolygonY: 5,
+    }
+  },
+  mounted() {
+    // 获取基础 Canvas 实例
+    let canvas = document.getElementById('basicCanvas')
+    this.init(canvas, this.basicImgSrc)
+    // 获取原始 Canvas 实例
+    this.originCanvas = document.getElementById('originCanvas')
+    this.originCanvasCtx = this.originCanvas.getContext('2d')
+    // 获取中转 Canvas 实例
+    this.transCanvas = document.getElementById('transCanvas')
+    this.transCanvasCtx = this.transCanvas.getContext('2d')
+  },
+  methods: {
+    // 初始化
+    init(canvas, imgSrc) {
+      if (!canvas.getContext) return '不支持 canvas'
+      this.canvas = canvas
+      this.ctx = canvas.getContext('2d')
+      this.drawTemplate(imgSrc)
+
+      this.canvas.addEventListener('mousedown', this.mousedownHandler.bind(this), false)
+      this.canvas.addEventListener('mousemove', this.mousemoveHandler.bind(this), false)
+      this.canvas.addEventListener('mouseup', this.mouseupHandler.bind(this), false)
+    },
+
+    // 设置画布大小
+    setCanvasSize(width, height, targetEl = 'canvas') {
+      this[targetEl].width = width
+      this[targetEl].height = height
+    },
+
+    // 绘制初始化基础图片
+    drawTemplate(imgSrc) {
+      let img = new Image()
+      img.onload = () => {
+        this.basicImg = img
+        let { width, height } = img
+        // 将原始大小的图像画到 originCanvas 上
+        this.setCanvasSize(width, height, 'originCanvas')
+        this.originCanvasCtx.drawImage(img, 0, 0, width, height)
+
+        // 判断是否需要缩放
+        if (width > this.maxBasicCanvasW || height > this.maxBasicCanvasH) {
+          let ratioW = Math.floor(this.maxBasicCanvasW / width * 100) / 100
+          let ratioH = Math.floor(this.maxBasicCanvasH / height * 100) / 100
+          this.canvasScaleRatio = this.judgeNumMaxOrMin(ratioW, ratioH, 'mini')
+          width = this.computeProduct([width, this.canvasScaleRatio])
+          height = this.computeProduct([height, this.canvasScaleRatio])
+        }
+
+        this.setCanvasSize(width, height, 'canvas')
+        this.basicImgSize = [width, height]
+        this.ctx.drawImage(img, 0, 0, width, height)
+        this.setLatestCanvasBackUp()
+      }
+      img.src = imgSrc
+    },
+
+    // 清空
+    clearCanvas() {
+      this.ctx.clearRect(0, 0, this.basicImgSize[0], this.basicImgSize[1])
+    },
+
+    // 鼠标按下
+    mousedownHandler(e) {
+      if (this.isOcrLockIn) return false
+      this.canSetArea = true
+      this.originPos = [e.offsetX, e.offsetY]
+    },
+
+    // 鼠标移动
+    mousemoveHandler(e) {
+      if (this.canSetArea) {
+        if (this.menuParam.isShow) this.menuParam.isShow = false
+        this.areaSize = [e.offsetX - this.originPos[0] , e.offsetY - this.originPos[1]]
+        this.updateCanvas()
+        this.ctx.strokeRect(this.originPos[0], this.originPos[1], this.areaSize[0], this.areaSize[1])
+      }
+    },
+
+    // 鼠标松开
+    mouseupHandler(e) {
+      this.canSetArea = false
+      // 存在实际可识别区域时，打开操作菜单
+      if (Math.abs(this.areaSize[0]) >= this.miniBoundary && Math.abs(this.areaSize[1]) >= this.miniBoundary) {
+        this.menuParam = {
+          isShow: true,
+          left: `${e.clientX}px`,
+          top: `${e.clientY}px`
+        }
+      } else if (this.areaSize[0] && this.areaSize[1]) {
+        this.$message.warning('请画出有效识别区域')
+        this.updateCanvas()
+      } else {
+        this.$message.warning('请先选择对应的项')
+      }
+    },
+
+    // 渲染最近一次保存的渲染结果
+    updateCanvas() {
+      if (this.latestCanvasBackUp) {
+        this.ctx.putImageData(this.latestCanvasBackUp, 0, 0)
+      }
+    },
+
+    // 保存最近一次展示画布的渲染结果
+    setLatestCanvasBackUp() {
+      let imgData = this.ctx.getImageData(0, 0, this.basicImgSize[0], this.basicImgSize[1])
+      this.latestCanvasBackUp = imgData
+
+      // 保存基础图片的数据
+      if (!this.originalBasicImgData) this.originalBasicImgData = imgData
+    },
+
+    /**
+     * 将识别区域从 原始Canvas 上，画到 transCanvas 上
+     *
+     * @return base64
+     */
+    setTransCanvasToBase64() {
+      let x = this.computeDivision(this.originPos[0], this.canvasScaleRatio)
+      let y = this.computeDivision(this.originPos[1], this.canvasScaleRatio)
+      let width = this.computeDivision(this.areaSize[0], this.canvasScaleRatio)
+      let height = this.computeDivision(this.areaSize[1], this.canvasScaleRatio)
+
+      let currentOcrImgData = this.originCanvasCtx.getImageData(x, y, width, height)
+      this.setCanvasSize(currentOcrImgData.width, currentOcrImgData.height, 'transCanvas')
+      this.transCanvasCtx.putImageData(currentOcrImgData, 0, 0)
+      let base64 = this.transCanvas.toDataURL('image/png', 1)
+      this.ocrImgBase64Map[this.ocrClipKeyCount] = base64
+
+      return base64
+    },
+
+    /**
+     * 文字识别
+     *
+     * @param isReOcr 是否是重新识别
+     * @param clipKey 需要重新识别区域对应的key
+     */
+    generalOCR(isReOcr = false, clipKey = 0) {
+      if (this.isOcrLockIn && !isReOcr) return false
+
+      let transCanvasBase64 = ''
+      if (isReOcr) {
+        if (!this.ocrImgBase64Map[clipKey]) return false
+        transCanvasBase64 = this.ocrImgBase64Map[clipKey]
+      }
+      else transCanvasBase64 = this.setTransCanvasToBase64()
+
+      this.fetchGeneralOCR(transCanvasBase64).then(datas => {
+        this.ocrImgStack.push({
+          key: this.ocrClipKeyCount,
+          x: this.originPos[0],
+          y: this.originPos[1],
+          width: this.areaSize[0],
+          height: this.areaSize[1]
+        })
+        this.isOcrLockIn = true
+        this.setLatestCanvasBackUp()
+        this.resetBasicCanvas()
+
+        switch (this.ocrType) {
+          case 'common': {
+            let actualRes = this.basicDataFormat(datas.TextDetections || [])
+            this.$emit('getBasicOCR', { actualRes, currentOcrClipKey: clipKey || this.ocrClipKeyCount })
+            break
+          }
+          case 'table': {
+            let _TableDetections = datas.TableDetections || []
+            _TableDetections = _TableDetections.filter(item => !!item.Type)
+            let formatRes = this.tableDataFormat(_TableDetections)
+            this.$emit('getTableOCR', formatRes)
+            break
+          }
+          default:
+            return
+        }
+      })
+    },
+
+    /**
+     * 将 basicCanvas 画布重绘至最新状态，同时重置相关参数
+     */
+    resetBasicCanvas() {
+      this.updateCanvas()
+      this.originPos = [0, 0]
+      this.areaSize = [0, 0]
+      this.menuParam.isShow = false
+    },
+
+    /**
+     * 解除关联
+     *
+     * @param relieveKey 需要解除关联的区域对应的key
+     */
+    relieveRelationOCR(relieveKey) {
+      if (Object.prototype.hasOwnProperty.call(this.ocrImgBase64Map, relieveKey)) delete this.ocrImgBase64Map[relieveKey]
+      if (this.ocrImgStack.length) this.ocrImgStack = this.ocrImgStack.filter(item => item.key !== relieveKey)
+
+      this.ctx.putImageData(this.originalBasicImgData, 0, 0)
+      this.ocrImgStack.forEach(item => {
+        this.ctx.strokeRect(item.x, item.y, item.width, item.height)
+      })
+      this.setLatestCanvasBackUp()
+    },
+
+    handleOCR() {
+      this.generalOCR(false)
+    },
+
+    handleReGeneralOCR(clipKey) {
+      if (!clipKey) {
+        this.$message.error('无效 clipKey')
+        return false
+      }
+      this.generalOCR(true, clipKey)
+    },
+
+    cancelCurrentOCRArea() {
+      this.updateCanvas()
+      this.menuParam.isShow = false
+    },
+
+    // 生成key，且允许用户进行区域选择
+    generateKeyToClip() {
+      this.ocrClipKeyCount++
+      this.isOcrLockIn = false // 取消锁定
+
+      return this.ocrClipKeyCount
+    },
+
+    /**
+     * 格式化通用文字识别结果
+     *
+     * @param {array} TextDetections
+     */
+    basicDataFormat(TextDetections) {
+      let actualRes = ''
+      if (TextDetections.length) TextDetections.forEach(item => actualRes += item.DetectedText)
+
+      return actualRes
+    },
+
+    /**
+     * 格式化表格识别结果
+     *
+     * @param {array} TableDetections
+     */
+    tableDataFormat(TableDetections) {
+      let formatRes = []
+      let maxColNum = 0
+      TableDetections.forEach(item => {
+        let cellList = item.Cells || []
+        if (cellList.length) {
+          let tableList = []
+          // 基准值
+          let referenceVal = cellList[0]?.Polygon[0]?.Y || 0
+          // 每一行包含的col
+          let perRowList = []
+          cellList.forEach((cellItem, cellIndex) => {
+            if (this.judgeColToSameLevel(referenceVal, cellItem.Polygon[0].Y)) {
+              perRowList.push(cellItem.Text)
+              if (cellIndex === cellList.length - 1) {
+                tableList.push(perRowList)
+                maxColNum = this.judgeNumMaxOrMin(maxColNum, perRowList.length)
+              }
+            } else {
+              tableList.push(perRowList)
+              maxColNum = this.judgeNumMaxOrMin(maxColNum, perRowList.length)
+              perRowList = [cellItem.Text]
+              referenceVal = cellItem.Polygon[0].Y || 0
+            }
+          })
+          formatRes.push({
+            tableList,
+            maxColNum
+          })
+        }
+      })
+      return formatRes
+    },
+
+    /**
+     * 判断当前col和上一个col，是否是同一层
+     *
+     * @param {number} preY
+     * @param {number} nextY
+     */
+    judgeColToSameLevel(preY, nextY) {
+      return Math.abs(preY - nextY) <= this.miniColPolygonY
+    },
+
+    judgeNumMaxOrMin(num1, num2, type = 'max') {
+      if (type === 'max') return num1 > num2 ? num1 : num2
+      return num1 <= num2 ? num1 : num2
+    },
+
+    /**
+     * 计算乘积
+     *
+     * @param arr
+     * @return {number}
+     */
+    computeProduct(arr) {
+      let count = 1
+      let decimal = ''
+      let temp_arr = arr.map(item => {
+        decimal = String(item).split('.')
+        if (decimal[1] && decimal[1].length) {
+          count *= 10 ** decimal[1].length
+          return decimal[0] + decimal[1]
+        } else return item
+      })
+      let product = temp_arr.reduce((accumulator, currentValue) => accumulator * currentValue)
+      let result = product / count
+      return result
+    },
+
+    /**
+     * 计算除法
+     *
+     * @param num1 被除数
+     * @param num2 除数
+     */
+    computeDivision(num1, num2) {
+      return num1 / num2
+    }
+  }
+}
+</script>
+
+<style scoped>
+#menu {
+  position: absolute;
+  padding: 3px 6px;
+  border: 1px solid grey;
+  background: skyblue;
+}
+span {
+  cursor: pointer;
+}
+</style>
