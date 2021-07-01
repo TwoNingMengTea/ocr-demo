@@ -12,10 +12,12 @@
       <div>
         <div class="input-box" v-for="(item, index) in inputList" :key="item.key || index">
           <span>{{item.label}}</span>
-          <el-input v-model="item.value" placeholder="请输入内容" @input="(value) => handleInput(value, item, index)"></el-input>
-          <el-button type="text" @click="setRelationOCR(item, index)">识别</el-button>
-          <el-button type="text" @click="deleteOCR(item, index)">删除</el-button>
-          <el-button type="text" @click="printResult(item, index)">打印结果</el-button>
+          <el-input v-model="item.value" placeholder="请输入内容" @input="(value) => handleInput(value, item, index)">
+            <div slot="suffix">
+              <el-button type="text" @click="setRelationOCR(item, index)">识别</el-button>
+              <el-button type="text" @click="deleteOCR(item, index)">删除</el-button>
+            </div>
+          </el-input>
         </div>
       </div>
       <div>
@@ -23,11 +25,14 @@
           <div>表格</div>
           <el-button @click="setTableOCR">识别</el-button>
           <el-button @click="deleteTableOCR">删除</el-button>
+          <el-button @click="printTableData">打印</el-button>
         </div>
         <div>
           <div v-for="(item, index) in this.tableOCR.value" :key="`table${index}`">
             <div class="col-box" v-for="(rowItem, rowIndex) in item.tableList" :key="`colBox${rowIndex}`">
-              <div class="col" v-for="(colItem, colIndex) in rowItem" :key="colIndex">{{colItem}}</div>
+              <div class="col" v-for="(colItem, colIndex) in rowItem" :key="colIndex">
+                <el-input v-model="rowItem[colIndex]" placeholder="请输入内容"></el-input>
+              </div>
               <div class="col" v-if="rowIndex > 1">
                 <el-button type="text" @click="mergeTableRowToPre(index, rowIndex)">合并</el-button>
               </div>
@@ -108,9 +113,6 @@ export default {
       }
       this.$forceUpdate()
     },
-    printResult() {
-      console.log(this.inputList)
-    },
 
     getTableOCR(option) {
       console.log(option)
@@ -181,6 +183,10 @@ export default {
       _table[rowIndex - 1] = targetRow
       _table.splice(rowIndex, 1)
       this.tableOCR.value[tableIndex].tableList = _table
+    },
+
+    printTableData() {
+      console.log(this.tableOCR.value)
     }
   }
 }
