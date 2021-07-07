@@ -22,20 +22,22 @@
         </div>
       </div>
       <div>
-        <div>
-          <div>表格</div>
-          <el-button @click="setTableOCR">识别</el-button>
-          <el-button @click="deleteTableOCR">删除</el-button>
-          <el-button @click="printTableData">打印表格数据</el-button>
-        </div>
-        <div>
-          <div v-for="(item, index) in this.tableOCR.value" :key="`table${index}`">
-            <div class="col-box" v-for="(rowItem, rowIndex) in item.tableList" :key="`colBox${rowIndex}`">
-              <div class="col" v-for="(colItem, colIndex) in rowItem" :key="colIndex">
-                <el-input v-model="rowItem[colIndex]" placeholder="请输入内容"></el-input>
-              </div>
-              <div class="col" v-if="rowIndex > 1">
-                <el-button type="text" @click="mergeTableRowToPre(index, rowIndex)">合并</el-button>
+        <el-button @click="printTableData">打印表格数据</el-button>
+        <div class="table-box" v-for="(tableItem, tableIndex) in tableOCR" :key="`tableItem${tableIndex}`">
+          <div class="table-btn-box">
+            <div class="title">表格</div>
+            <el-button @click="setTableOCR(tableItem, tableIndex)">识别</el-button>
+            <el-button @click="deleteTableOCR(tableItem, tableIndex)">删除</el-button>
+          </div>
+          <div>
+            <div class="table-item" v-for="(item, index) in tableItem.value" :key="`table${index}`">
+              <div class="col-box" v-for="(rowItem, rowIndex) in item.tableList" :key="`colBox${rowIndex}`">
+                <div class="col" v-for="(colItem, colIndex) in rowItem" :key="colIndex">
+                  <el-input v-model="rowItem[colIndex]" placeholder="请输入内容" @input="() => $forceUpdate()"></el-input>
+                </div>
+                <div class="col" v-if="rowIndex > 0">
+                  <el-button type="text" @click="mergeTableRowToPre(tableIndex, index, rowIndex)">合并</el-button>
+                </div>
               </div>
             </div>
           </div>
@@ -71,36 +73,40 @@ export default {
         require('@/assets/report0.png'),
         require('@/assets/report1.png'),
         require('@/assets/report2.png'),
+        require('@/assets/report3.png'),
       ],
       ocrType: 'common',
-      tableOCR: {
-        key: null,
-        value: []
-      }
+      tableOCR: [
+        { key: null, value: [] },
+        { key: null, value: [] },
+        { key: null, value: [] }
+      ]
     }
   },
   methods: {
     setRelationOCR(item, index) {
+      console.log(item)
       this.ocrType = 'common'
-      let _item = { ...item }
-      console.log(_item)
-      if (_item.key && _item.value) { // 如果key存在，则表示当前操作为 重新识别
-        this.$refs.drawingBoard.handleReGeneralOCR(_item.basicImgIndex, _item.key)
+      if (item.key && item.value) { // 如果key存在，则表示当前操作为 重新识别
+        this.$refs.drawingBoard.handleReGeneralOCR(item.basicImgIndex, item.key)
       } else { // 不存在key，则表示当前操作为生成key
-        _item.key = this.$refs.drawingBoard.generateKeyToClip()
-        this.inputList[index] = _item
+        this.inputList[index] = {
+          ...item,
+          key: this.$refs.drawingBoard.generateKeyToClip()
+        }
       }
     },
     deleteOCR(item, index) {
-      let _item = { ...item }
-      if (!_item.key) {
+      if (!item.key) {
         this.$message.warning('当前项不可删除')
         return false
       }
-      this.$refs.drawingBoard.relieveRelationOCR(_item.basicImgIndex, _item.key)
-      _item.key = null
-      _item.value = ''
-      this.inputList[index] = _item
+      this.$refs.drawingBoard.relieveRelationOCR(item.basicImgIndex, item.key)
+      this.inputList[index] = {
+        label: item.label,
+        key: null,
+        value: ''
+      }
       this.$forceUpdate()
     },
     /**
@@ -125,7 +131,14 @@ export default {
 
     getTableOCR(option) {
       console.log(option)
-      this.tableOCR.value = option
+      let { formatRes, currentOcrClipKey, basicImgIndex } = option
+      let currentIndex = this.tableOCR.findIndex(item => item.key === currentOcrClipKey)
+      this.tableOCR[currentIndex] = {
+        basicImgIndex,
+        key: currentOcrClipKey,
+        value: formatRes
+      }
+      this.$forceUpdate()
     },
 
     /**
@@ -162,36 +175,40 @@ export default {
     },
 
     // 表格识别
-    setTableOCR() {
+    setTableOCR(item, index) {
       this.ocrType = 'table'
-      if (this.tableOCR.key && this.tableOCR.value) this.$refs.drawingBoard.handleReGeneralOCR(this.tableOCR.key)
-      else this.tableOCR.key = this.$refs.drawingBoard.generateKeyToClip()
+      if (item.key && item.value?.length) {
+        this.$refs.drawingBoard.handleReGeneralOCR(item.basicImgIndex, item.key)
+      }
+      else this.tableOCR[index].key = this.$refs.drawingBoard.generateKeyToClip()
     },
 
     // 删除
-    deleteTableOCR() {
-      if (!this.tableOCR.key) {
+    deleteTableOCR(item, index) {
+      if (!item.key) {
         this.$message.warning('当前项不可删除')
         return false
       }
-      this.$refs.drawingBoard.relieveRelationOCR(this.tableOCR.key)
-      this.tableOCR = {
+      this.$refs.drawingBoard.relieveRelationOCR(item.basicImgIndex, item.key)
+      this.tableOCR[index] = {
         key: null,
         value: []
       }
+      this.$forceUpdate()
     },
 
     // 表格合并
-    mergeTableRowToPre(tableIndex, rowIndex) {
-      let _table = this.tableOCR.value[tableIndex].tableList
+    mergeTableRowToPre(tableIndex, index, rowIndex) {
+      let _table = this.tableOCR[tableIndex].value[index].tableList
       let targetRow = _table[rowIndex - 1]
       let sourceRow = _table[rowIndex]
       sourceRow.forEach((item, index) => {
-        targetRow[index] = targetRow[index] + item
+        targetRow[index] = (targetRow[index] || '') + item
       })
       _table[rowIndex - 1] = targetRow
       _table.splice(rowIndex, 1)
-      this.tableOCR.value[tableIndex].tableList = _table
+      this.tableOCR[tableIndex].value[index].tableList = _table
+      this.$forceUpdate()
     },
 
     printCommonData() {
@@ -199,7 +216,7 @@ export default {
     },
 
     printTableData() {
-      console.log(this.tableOCR.value)
+      console.log(this.tableOCR)
     }
   }
 }
@@ -212,7 +229,7 @@ export default {
 .input-box {
   display: flex;
   align-items: center;
-  margin-top: 15px;
+  margin: 10px;
   width: 400px;
 }
 span {
@@ -224,5 +241,21 @@ span {
 }
 .col {
   width: 150px;
+}
+.table-box {
+  padding-bottom: 10px;
+  margin: 10px;
+  border-bottom: 1px solid lightgrey;
+}
+.table-btn-box {
+  margin-bottom: 10px;
+}
+.title {
+  margin-bottom: 10px;
+}
+.table-item {
+  padding: 10px;
+  margin-bottom: 10px;
+  border: 1px solid skyblue;
 }
 </style>

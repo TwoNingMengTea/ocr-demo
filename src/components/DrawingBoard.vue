@@ -7,11 +7,13 @@
       <canvas id="originalCanvas" v-show="false"></canvas>
       <!--  用于将裁剪区域二进制数据转换成base64  -->
       <canvas id="transCanvas" v-show="false"></canvas>
+      <!--   菜单   -->
       <div id="menu" v-if="menuParam.isShow" :style="{left: menuParam.left, top: menuParam.top}">
         <span id="yes" @click="handleOCR">识别</span> |
         <span id="no" @click="cancelCurrentOCRArea">取消</span>
       </div>
     </div>
+    <!--  翻页  -->
     <div class="canvas-btn-box" v-if="basicImgList.length > 1">
       <el-button :disabled="!basicImgIndex" @click="changeBasicImg(-1)">上一页</el-button>
       <el-button :disabled="basicImgIndex === basicImgList.length - 1" @click="changeBasicImg(1)">下一页</el-button>
@@ -319,7 +321,7 @@ export default {
             this.$emit('getBasicOCR', {
               actualRes,
               currentOcrClipKey: clipKey || this.ocrClipKeyCount,
-              basicImgIndex: basicImgIndex
+              basicImgIndex
             })
             break
           }
@@ -327,7 +329,11 @@ export default {
             let _TableDetections = datas.TableDetections || []
             _TableDetections = _TableDetections.filter(item => !!item.Type)
             let formatRes = this.tableDataFormat(_TableDetections)
-            this.$emit('getTableOCR', formatRes)
+            this.$emit('getTableOCR', {
+              formatRes,
+              currentOcrClipKey: clipKey || this.ocrClipKeyCount,
+              basicImgIndex
+            })
             break
           }
           default:
