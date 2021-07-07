@@ -3,13 +3,14 @@
     <DrawingBoard
             ref="drawingBoard"
             :ocrType="ocrType"
-            :basicImgSrc="basicImgSrc"
+            :basicImgList="basicImgList"
             :fetchGeneralOCR="fetchGeneralBasicOCR"
             @getBasicOCR="getBasicOCR"
             @getTableOCR="getTableOCR"
     ></DrawingBoard>
     <div>
       <div>
+        <el-button @click="printCommonData">打印</el-button>
         <div class="input-box" v-for="(item, index) in inputList" :key="item.key || index">
           <span>{{item.label}}</span>
           <el-input v-model="item.value" placeholder="请输入内容" @input="(value) => handleInput(value, item, index)">
@@ -25,7 +26,7 @@
           <div>表格</div>
           <el-button @click="setTableOCR">识别</el-button>
           <el-button @click="deleteTableOCR">删除</el-button>
-          <el-button @click="printTableData">打印</el-button>
+          <el-button @click="printTableData">打印表格数据</el-button>
         </div>
         <div>
           <div v-for="(item, index) in this.tableOCR.value" :key="`table${index}`">
@@ -55,16 +56,22 @@ export default {
   },
   data() {
     return {
-      inputList: [{
-        key: null,
-        label: 'test1',
-        value: null
-      }, {
-        key: null,
-        label: 'test2',
-        value: null
-      }],
-      basicImgSrc: require('@/assets/report3.png'),
+      inputList: [
+        { key: null, label: 'test1', value: null },
+        { key: null, label: 'test2', value: null },
+        { key: null, label: 'test3', value: null },
+        { key: null, label: 'test4', value: null },
+        { key: null, label: 'test5', value: null },
+        { key: null, label: 'test6', value: null },
+        { key: null, label: 'test7', value: null },
+        { key: null, label: 'test8', value: null },
+        { key: null, label: 'test9', value: null },
+      ],
+      basicImgList: [
+        require('@/assets/report0.png'),
+        require('@/assets/report1.png'),
+        require('@/assets/report2.png'),
+      ],
       ocrType: 'common',
       tableOCR: {
         key: null,
@@ -76,8 +83,9 @@ export default {
     setRelationOCR(item, index) {
       this.ocrType = 'common'
       let _item = { ...item }
+      console.log(_item)
       if (_item.key && _item.value) { // 如果key存在，则表示当前操作为 重新识别
-        this.$refs.drawingBoard.handleReGeneralOCR(_item.key)
+        this.$refs.drawingBoard.handleReGeneralOCR(_item.basicImgIndex, _item.key)
       } else { // 不存在key，则表示当前操作为生成key
         _item.key = this.$refs.drawingBoard.generateKeyToClip()
         this.inputList[index] = _item
@@ -89,7 +97,7 @@ export default {
         this.$message.warning('当前项不可删除')
         return false
       }
-      this.$refs.drawingBoard.relieveRelationOCR(_item.key)
+      this.$refs.drawingBoard.relieveRelationOCR(_item.basicImgIndex, _item.key)
       _item.key = null
       _item.value = ''
       this.inputList[index] = _item
@@ -104,9 +112,10 @@ export default {
      */
     getBasicOCR(option) {
       console.log(option)
-      let { actualRes, currentOcrClipKey } = option
+      let { actualRes, currentOcrClipKey, basicImgIndex } = option
       let currentIndex = this.inputList.findIndex(item => item.key === currentOcrClipKey)
       this.inputList[currentIndex] = {
+        basicImgIndex,
         key: currentOcrClipKey,
         label: this.inputList[currentIndex].label,
         value: actualRes
@@ -185,6 +194,10 @@ export default {
       this.tableOCR.value[tableIndex].tableList = _table
     },
 
+    printCommonData() {
+      console.log(this.inputList)
+    },
+
     printTableData() {
       console.log(this.tableOCR.value)
     }
@@ -200,6 +213,7 @@ export default {
   display: flex;
   align-items: center;
   margin-top: 15px;
+  width: 400px;
 }
 span {
   margin-right: 10px;

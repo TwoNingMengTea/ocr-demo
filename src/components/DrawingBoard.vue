@@ -1,14 +1,20 @@
 <template>
   <div class="canvas-container">
-    <!--  基础画布  -->
-    <canvas id="basicCanvas"></canvas>
-    <!--  原始画布  -->
-    <canvas id="originCanvas" v-show="false"></canvas>
-    <!--  用于将裁剪区域二进制数据转换成base64  -->
-    <canvas id="transCanvas" v-show="false"></canvas>
-    <div id="menu" v-if="menuParam.isShow" :style="{left: menuParam.left, top: menuParam.top}">
-      <span id="yes" @click="handleOCR">识别</span> |
-      <span id="no" @click="cancelCurrentOCRArea">取消</span>
+    <div class="canvas-box">
+      <!--  基础画布  -->
+      <canvas id="basicCanvas"></canvas>
+      <!--  原始画布  -->
+      <canvas id="originalCanvas" v-show="false"></canvas>
+      <!--  用于将裁剪区域二进制数据转换成base64  -->
+      <canvas id="transCanvas" v-show="false"></canvas>
+      <div id="menu" v-if="menuParam.isShow" :style="{left: menuParam.left, top: menuParam.top}">
+        <span id="yes" @click="handleOCR">识别</span> |
+        <span id="no" @click="cancelCurrentOCRArea">取消</span>
+      </div>
+    </div>
+    <div class="canvas-btn-box" v-if="basicImgList.length > 1">
+      <el-button :disabled="!basicImgIndex" @click="changeBasicImg(-1)">上一页</el-button>
+      <el-button :disabled="basicImgIndex === basicImgList.length - 1" @click="changeBasicImg(1)">下一页</el-button>
     </div>
   </div>
 </template>
@@ -23,8 +29,8 @@ export default {
       default: 'common'
     },
     // 图片路径
-    basicImgSrc: {
-      type: String,
+    basicImgList: {
+      type: Array,
       isRequired: true
     },
     // ocr接口请求函数
@@ -50,23 +56,31 @@ export default {
       ctx: null,
 
       // 原始Canvas，根据图像原始大小进行绘制
-      originCanvas: null,
-      originCanvasCtx: null,
+      originalCanvas: null,
+      originalCanvasCtx: null,
 
       // 中转Canvas，用于将 Canvas ImageData 转换成 base64
       transCanvas: null,
       transCanvasCtx: null,
 
       // 缩放比例
-      canvasScaleRatio: 1,
+      canvasScaleRatio: [],
 
-      // 初始图片
-      // 对象
-      basicImg: null,
+      // 当前展示图片
       // 大小
-      basicImgSize: [0, 0],
+      basicImgSize: [],
+      basicImgIndex: 0,
       // 二进制数据
-      originalBasicImgData: null,
+      basicImgData: [],
+
+      // 原始图片信息
+      // 大小
+      originalBasicImgSize: [],
+      // 二进制数据
+      originalBasicImgData: [],
+      // 用于判断是否需要更新 originalCanvas，默认为false（第一次渲染会主动更新）
+      needUpdateOriginalCanvas: false,
+
       // 是否可以开始 "画" 识别区域
       canSetArea: false,
 
@@ -77,12 +91,12 @@ export default {
       areaSize: [0, 0],
       // key count
       ocrClipKeyCount: 1000,
-      // 区域集合，[{ key, x, y, width, height }]
+      // 区域集合，[[{ key, x, y, width, height }]]
       ocrImgStack: [],
-      ocrImgBase64Map: {},
+      ocrImgBase64Map: [],
 
       // 最近一次画布的渲染结果
-      latestCanvasBackUp: null,
+      latestCanvasBackUp: [],
       // 菜单选项
       menuParam: {
         isShow: false,
@@ -99,23 +113,36 @@ export default {
     }
   },
   mounted() {
-    // 获取基础 Canvas 实例
-    let canvas = document.getElementById('basicCanvas')
-    this.init(canvas, this.basicImgSrc)
+    // 初始化数据结构
+    let len = this.basicImgList.length
+    this.canvasScaleRatio = Array.from(new Array(len), () => 1)
+    this.basicImgSize = Array.from(new Array(len), () => [0, 0])
+    this.basicImgData = Array.from(new Array(len), () => null)
+
+    this.originalBasicImgSize = Array.from(new Array(len), () => [0, 0])
+    this.originalBasicImgData = Array.from(new Array(len), () => null)
+
+    this.ocrImgStack = Array.from(new Array(len), () => [])
+    this.ocrImgBase64Map = Array.from(new Array(len), () => ({}))
+    this.latestCanvasBackUp = Array.from(new Array(len), () => null)
+
+    // 初始化基础画布
+    this.init()
     // 获取原始 Canvas 实例
-    this.originCanvas = document.getElementById('originCanvas')
-    this.originCanvasCtx = this.originCanvas.getContext('2d')
+    this.originalCanvas = document.getElementById('originalCanvas')
+    this.originalCanvasCtx = this.originalCanvas.getContext('2d')
     // 获取中转 Canvas 实例
     this.transCanvas = document.getElementById('transCanvas')
     this.transCanvasCtx = this.transCanvas.getContext('2d')
   },
   methods: {
     // 初始化
-    init(canvas, imgSrc) {
+    init() {
+      let canvas = document.getElementById('basicCanvas')
       if (!canvas.getContext) return '不支持 canvas'
       this.canvas = canvas
       this.ctx = canvas.getContext('2d')
-      this.drawTemplate(imgSrc)
+      this.drawTemplate()
 
       this.canvas.addEventListener('mousedown', this.mousedownHandler.bind(this), false)
       this.canvas.addEventListener('mousemove', this.mousemoveHandler.bind(this), false)
@@ -123,41 +150,46 @@ export default {
     },
 
     // 设置画布大小
-    setCanvasSize(width, height, targetEl = 'canvas') {
+    setCanvasSize([width, height], targetEl = 'canvas') {
       this[targetEl].width = width
       this[targetEl].height = height
     },
 
     // 绘制初始化基础图片
-    drawTemplate(imgSrc) {
-      let img = new Image()
-      img.onload = () => {
-        this.basicImg = img
-        let { width, height } = img
-        // 将原始大小的图像画到 originCanvas 上
-        this.setCanvasSize(width, height, 'originCanvas')
-        this.originCanvasCtx.drawImage(img, 0, 0, width, height)
+    drawTemplate() {
+      let basicImgIndex = this.basicImgIndex
 
-        // 判断是否需要缩放
-        if (width > this.maxBasicCanvasW || height > this.maxBasicCanvasH) {
-          let ratioW = Math.floor(this.maxBasicCanvasW / width * 100) / 100
-          let ratioH = Math.floor(this.maxBasicCanvasH / height * 100) / 100
-          this.canvasScaleRatio = this.judgeNumMaxOrMin(ratioW, ratioH, 'mini')
-          width = this.computeProduct([width, this.canvasScaleRatio])
-          height = this.computeProduct([height, this.canvasScaleRatio])
+      if (this.latestCanvasBackUp[basicImgIndex]) {
+        this.setCanvasSize(this.basicImgSize[basicImgIndex])
+        this.ctx.putImageData(this.latestCanvasBackUp[basicImgIndex], 0, 0)
+        this.needUpdateOriginalCanvas = true
+      } else {
+        let img = new Image()
+        img.onload = () => {
+          let { width, height } = img
+          // 将原始大小的图像画到 originalCanvas 上
+          this.setCanvasSize([width, height], 'originalCanvas')
+          this.originalCanvasCtx.drawImage(img, 0, 0, width, height)
+          this.originalBasicImgSize[basicImgIndex] = [width, height]
+          this.originalBasicImgData[basicImgIndex] = this.originalCanvasCtx.getImageData(0, 0, width, height)
+
+          // 判断是否需要缩放
+          if (width > this.maxBasicCanvasW || height > this.maxBasicCanvasH) {
+            let ratioW = Math.floor(this.maxBasicCanvasW / width * 100) / 100
+            let ratioH = Math.floor(this.maxBasicCanvasH / height * 100) / 100
+            let scaleRatio = this.judgeNumMaxOrMin(ratioW, ratioH, 'mini')
+            this.canvasScaleRatio[basicImgIndex] = scaleRatio
+            width = this.computeProduct([width, scaleRatio])
+            height = this.computeProduct([height, scaleRatio])
+          }
+
+          this.setCanvasSize([width, height], 'canvas')
+          this.basicImgSize[basicImgIndex] = [width, height]
+          this.ctx.drawImage(img, 0, 0, width, height)
+          this.setLatestCanvasBackUp(basicImgIndex)
         }
-
-        this.setCanvasSize(width, height, 'canvas')
-        this.basicImgSize = [width, height]
-        this.ctx.drawImage(img, 0, 0, width, height)
-        this.setLatestCanvasBackUp()
+        img.src = this.basicImgList[basicImgIndex]
       }
-      img.src = imgSrc
-    },
-
-    // 清空
-    clearCanvas() {
-      this.ctx.clearRect(0, 0, this.basicImgSize[0], this.basicImgSize[1])
     },
 
     // 鼠标按下
@@ -196,19 +228,26 @@ export default {
     },
 
     // 渲染最近一次保存的渲染结果
-    updateCanvas() {
-      if (this.latestCanvasBackUp) {
-        this.ctx.putImageData(this.latestCanvasBackUp, 0, 0)
+    updateCanvas(basicImgIndex = this.basicImgIndex) {
+      if (this.latestCanvasBackUp[basicImgIndex]) {
+        this.ctx.putImageData(this.latestCanvasBackUp[basicImgIndex], 0, 0)
       }
     },
 
-    // 保存最近一次展示画布的渲染结果
-    setLatestCanvasBackUp() {
-      let imgData = this.ctx.getImageData(0, 0, this.basicImgSize[0], this.basicImgSize[1])
-      this.latestCanvasBackUp = imgData
+    /**
+     * 保存对应下标的，最近一次展示画布的渲染结果
+     *
+     * @param basicImgIndex 下标
+     */
+    setLatestCanvasBackUp(basicImgIndex) {
+      let realCtx = 'ctx'
+      if (this.basicImgIndex !== basicImgIndex) realCtx = 'transCanvasCtx'
+
+      let imgData = this[realCtx].getImageData(0, 0, this.basicImgSize[basicImgIndex][0], this.basicImgSize[basicImgIndex][1])
+      this.latestCanvasBackUp[basicImgIndex] = imgData
 
       // 保存基础图片的数据
-      if (!this.originalBasicImgData) this.originalBasicImgData = imgData
+      if (!this.basicImgData[basicImgIndex]) this.basicImgData[basicImgIndex] = imgData
     },
 
     /**
@@ -217,16 +256,24 @@ export default {
      * @return base64
      */
     setTransCanvasToBase64() {
-      let x = this.computeDivision(this.originPos[0], this.canvasScaleRatio)
-      let y = this.computeDivision(this.originPos[1], this.canvasScaleRatio)
-      let width = this.computeDivision(this.areaSize[0], this.canvasScaleRatio)
-      let height = this.computeDivision(this.areaSize[1], this.canvasScaleRatio)
+      let basicImgIndex = this.basicImgIndex
+      let x = this.computeDivision(this.originPos[0], this.canvasScaleRatio[basicImgIndex])
+      let y = this.computeDivision(this.originPos[1], this.canvasScaleRatio[basicImgIndex])
+      let width = this.computeDivision(this.areaSize[0], this.canvasScaleRatio[basicImgIndex])
+      let height = this.computeDivision(this.areaSize[1], this.canvasScaleRatio[basicImgIndex])
 
-      let currentOcrImgData = this.originCanvasCtx.getImageData(x, y, width, height)
-      this.setCanvasSize(currentOcrImgData.width, currentOcrImgData.height, 'transCanvas')
+      // 需要重新渲染 originalCanvas
+      if (this.needUpdateOriginalCanvas) {
+        this.setCanvasSize(this.originalBasicImgSize[basicImgIndex], 'originalCanvas')
+        this.originalCanvasCtx.putImageData(this.originalBasicImgData[basicImgIndex], 0, 0)
+        this.needUpdateOriginalCanvas = false
+      }
+      let currentOcrImgData = this.originalCanvasCtx.getImageData(x, y, width, height)
+
+      this.setCanvasSize([currentOcrImgData.width, currentOcrImgData.height], 'transCanvas')
       this.transCanvasCtx.putImageData(currentOcrImgData, 0, 0)
       let base64 = this.transCanvas.toDataURL('image/png', 1)
-      this.ocrImgBase64Map[this.ocrClipKeyCount] = base64
+      this.ocrImgBase64Map[this.basicImgIndex][this.ocrClipKeyCount] = base64
 
       return base64
     },
@@ -237,32 +284,43 @@ export default {
      * @param isReOcr 是否是重新识别
      * @param clipKey 需要重新识别区域对应的key
      */
-    generalOCR(isReOcr = false, clipKey = 0) {
+    generalOCR(isReOcr = false, basicImgIndex = this.basicImgIndex, clipKey = 0) {
       if (this.isOcrLockIn && !isReOcr) return false
 
       let transCanvasBase64 = ''
       if (isReOcr) {
-        if (!this.ocrImgBase64Map[clipKey]) return false
-        transCanvasBase64 = this.ocrImgBase64Map[clipKey]
-      }
-      else transCanvasBase64 = this.setTransCanvasToBase64()
+        let imgData = this.ocrImgBase64Map[basicImgIndex][clipKey]
+        if (!imgData) return false
+        transCanvasBase64 = imgData
+      } else transCanvasBase64 = this.setTransCanvasToBase64()
 
       this.fetchGeneralOCR(transCanvasBase64).then(datas => {
-        this.ocrImgStack.push({
-          key: this.ocrClipKeyCount,
-          x: this.originPos[0],
-          y: this.originPos[1],
-          width: this.areaSize[0],
-          height: this.areaSize[1]
-        })
-        this.isOcrLockIn = true
-        this.setLatestCanvasBackUp()
-        this.resetBasicCanvas()
+        if (!isReOcr) {
+          this.ocrImgStack[this.basicImgIndex].push({
+            key: this.ocrClipKeyCount,
+            x: this.originPos[0],
+            y: this.originPos[1],
+            width: this.areaSize[0],
+            height: this.areaSize[1]
+          })
+
+          this.isOcrLockIn = true
+          this.setLatestCanvasBackUp(basicImgIndex)
+          // 重置
+          this.originPos = [0, 0]
+          this.areaSize = [0, 0]
+          this.menuParam.isShow = false
+        }
+        console.log('ocrImgStack：', this.ocrImgStack)
 
         switch (this.ocrType) {
           case 'common': {
             let actualRes = this.basicDataFormat(datas.TextDetections || [])
-            this.$emit('getBasicOCR', { actualRes, currentOcrClipKey: clipKey || this.ocrClipKeyCount })
+            this.$emit('getBasicOCR', {
+              actualRes,
+              currentOcrClipKey: clipKey || this.ocrClipKeyCount,
+              basicImgIndex: basicImgIndex
+            })
             break
           }
           case 'table': {
@@ -279,41 +337,44 @@ export default {
     },
 
     /**
-     * 将 basicCanvas 画布重绘至最新状态，同时重置相关参数
-     */
-    resetBasicCanvas() {
-      this.updateCanvas()
-      this.originPos = [0, 0]
-      this.areaSize = [0, 0]
-      this.menuParam.isShow = false
-    },
-
-    /**
      * 解除关联
      *
+     * @param basicImgIndex basicImgList的下标
      * @param relieveKey 需要解除关联的区域对应的key
      */
-    relieveRelationOCR(relieveKey) {
-      if (Object.prototype.hasOwnProperty.call(this.ocrImgBase64Map, relieveKey)) delete this.ocrImgBase64Map[relieveKey]
-      if (this.ocrImgStack.length) this.ocrImgStack = this.ocrImgStack.filter(item => item.key !== relieveKey)
+    relieveRelationOCR(basicImgIndex, relieveKey) {
+      if (Object.prototype.hasOwnProperty.call(this.ocrImgBase64Map[basicImgIndex], relieveKey)) delete this.ocrImgBase64Map[basicImgIndex][relieveKey]
+      if (this.ocrImgStack[basicImgIndex].length) this.ocrImgStack[basicImgIndex] = this.ocrImgStack[basicImgIndex].filter(item => item.key !== relieveKey)
 
-      this.ctx.putImageData(this.originalBasicImgData, 0, 0)
-      this.ocrImgStack.forEach(item => {
-        this.ctx.strokeRect(item.x, item.y, item.width, item.height)
+      let realCtx = 'ctx'
+      // 当前解除关联区域所在的下标，与当前下标不一致时，通过中转Canvas进行处理
+      if (this.basicImgIndex !== basicImgIndex) {
+        realCtx = 'transCanvasCtx'
+        this.setCanvasSize(this.basicImgSize[basicImgIndex], 'transCanvas')
+      }
+      this[realCtx].putImageData(this.basicImgData[basicImgIndex], 0, 0)
+
+      this.ocrImgStack[basicImgIndex].forEach(item => {
+        this[realCtx].strokeRect(item.x, item.y, item.width, item.height)
       })
-      this.setLatestCanvasBackUp()
+      this.setLatestCanvasBackUp(basicImgIndex)
     },
 
     handleOCR() {
       this.generalOCR(false)
     },
 
-    handleReGeneralOCR(clipKey) {
+    // 暴露方法：重新识别
+    handleReGeneralOCR(basicImgIndex, clipKey) {
+      if (!(typeof basicImgIndex === 'number' && basicImgIndex >= 0)) {
+        this.$message.error('无效 basicImgIndex')
+        return false
+      }
       if (!clipKey) {
         this.$message.error('无效 clipKey')
         return false
       }
-      this.generalOCR(true, clipKey)
+      this.generalOCR(true, basicImgIndex, clipKey)
     },
 
     cancelCurrentOCRArea() {
@@ -380,7 +441,7 @@ export default {
       return formatRes
     },
 
-    /**
+   /**
      * 判断当前col和上一个col，是否是同一层
      *
      * @param {number} preY
@@ -424,12 +485,21 @@ export default {
      */
     computeDivision(num1, num2) {
       return num1 / num2
+    },
+
+    changeBasicImg(val) {
+      this.basicImgIndex += val
+      this.menuParam.isShow = false
+      this.drawTemplate()
     }
   }
 }
 </script>
 
 <style scoped>
+.canvas-box {
+  border: 1px solid lightgrey;
+}
 #menu {
   position: absolute;
   padding: 3px 6px;
@@ -438,5 +508,8 @@ export default {
 }
 span {
   cursor: pointer;
+}
+.canvas-btn-box {
+  margin-top: 10px;
 }
 </style>
