@@ -8,7 +8,7 @@
       <!--  用于将裁剪区域二进制数据转换成base64  -->
       <canvas id="transCanvas" v-show="false"></canvas>
       <!--   菜单   -->
-      <div id="menu" v-if="menuParam.isShow" :style="{left: menuParam.left, top: menuParam.top}">
+      <div class="menu-box" v-if="menuParam.isShow" :style="{left: menuParam.left, top: menuParam.top}">
         <span id="yes" @click="handleOCR">识别</span> |
         <span id="no" @click="cancelCurrentOCRArea">取消</span>
       </div>
@@ -23,7 +23,7 @@
 
 <script>
 export default {
-  name: 'DrawingBoard',
+  name: 'ClipBoard',
   props: {
     // ocr类型：通用文字识别、表格识别
     ocrType: {
@@ -222,10 +222,10 @@ export default {
           top: `${e.clientY}px`
         }
       } else if (this.areaSize[0] && this.areaSize[1]) {
-        this.$message.warning('请画出有效识别区域')
+        this.$message?.warning('请画出有效识别区域')
         this.updateCanvas()
       } else {
-        this.$message.warning('请先选择对应的项')
+        this.$message?.warning('请先选择对应的项')
       }
     },
 
@@ -373,11 +373,11 @@ export default {
     // 暴露方法：重新识别
     handleReGeneralOCR(basicImgIndex, clipKey) {
       if (!(typeof basicImgIndex === 'number' && basicImgIndex >= 0)) {
-        this.$message.error('无效 basicImgIndex')
+        this.$message?.error('无效 basicImgIndex')
         return false
       }
       if (!clipKey) {
-        this.$message.error('无效 clipKey')
+        this.$message?.error('无效 clipKey')
         return false
       }
       this.generalOCR(true, basicImgIndex, clipKey)
@@ -506,7 +506,7 @@ export default {
 .canvas-box {
   border: 1px solid lightgrey;
 }
-#menu {
+.menu-box {
   position: absolute;
   padding: 3px 6px;
   border: 1px solid grey;

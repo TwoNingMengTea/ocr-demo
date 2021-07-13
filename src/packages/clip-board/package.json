@@ -1,0 +1,11 @@
+{
+  "name": "clipboard-ocr",
+  "version": "1.0.1",
+  "description": "canvas clip board ocr",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "hexh",
+  "license": "ISC"
+}

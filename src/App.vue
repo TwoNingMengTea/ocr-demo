@@ -1,13 +1,13 @@
 <template>
   <div id="app">
-    <DrawingBoard
-            ref="drawingBoard"
+    <ClipBoard
+            ref="clipBoard"
             :ocrType="ocrType"
             :basicImgList="basicImgList"
             :fetchGeneralOCR="fetchGeneralBasicOCR"
             @getBasicOCR="getBasicOCR"
             @getTableOCR="getTableOCR"
-    ></DrawingBoard>
+    ></ClipBoard>
     <div>
       <div>
         <el-button @click="printCommonData">打印</el-button>
@@ -48,13 +48,13 @@
 </template>
 
 <script>
-import DrawingBoard from '@/components/DrawingBoard'
+import ClipBoard from 'clipboard-ocr'
 import ocrModel from './model/ocr'
 
 export default {
   name: 'App',
   components: {
-    DrawingBoard
+    ClipBoard
   },
   data() {
     return {
@@ -83,16 +83,21 @@ export default {
       ]
     }
   },
+
+  mounted() {
+    console.log(typeof this.$refs.clipBoard)
+  },
+
   methods: {
     setRelationOCR(item, index) {
       console.log(item)
       this.ocrType = 'common'
       if (item.key && item.value) { // 如果key存在，则表示当前操作为 重新识别
-        this.$refs.drawingBoard.handleReGeneralOCR(item.basicImgIndex, item.key)
+        this.$refs.clipBoard.handleReGeneralOCR(item.basicImgIndex, item.key)
       } else { // 不存在key，则表示当前操作为生成key
         this.inputList[index] = {
           ...item,
-          key: this.$refs.drawingBoard.generateKeyToClip()
+          key: this.$refs.clipBoard.generateKeyToClip()
         }
       }
     },
@@ -101,7 +106,7 @@ export default {
         this.$message.warning('当前项不可删除')
         return false
       }
-      this.$refs.drawingBoard.relieveRelationOCR(item.basicImgIndex, item.key)
+      this.$refs.clipBoard.relieveRelationOCR(item.basicImgIndex, item.key)
       this.inputList[index] = {
         label: item.label,
         key: null,
@@ -138,6 +143,7 @@ export default {
         key: currentOcrClipKey,
         value: formatRes
       }
+      console.log(this.tableOCR)
       this.$forceUpdate()
     },
 
@@ -178,9 +184,9 @@ export default {
     setTableOCR(item, index) {
       this.ocrType = 'table'
       if (item.key && item.value?.length) {
-        this.$refs.drawingBoard.handleReGeneralOCR(item.basicImgIndex, item.key)
+        this.$refs.clipBoard.handleReGeneralOCR(item.basicImgIndex, item.key)
       }
-      else this.tableOCR[index].key = this.$refs.drawingBoard.generateKeyToClip()
+      else this.tableOCR[index].key = this.$refs.clipBoard.generateKeyToClip()
     },
 
     // 删除
@@ -189,7 +195,7 @@ export default {
         this.$message.warning('当前项不可删除')
         return false
       }
-      this.$refs.drawingBoard.relieveRelationOCR(item.basicImgIndex, item.key)
+      this.$refs.clipBoard.relieveRelationOCR(item.basicImgIndex, item.key)
       this.tableOCR[index] = {
         key: null,
         value: []
