@@ -73,7 +73,7 @@ export default {
         require('@/assets/report0.png'),
         require('@/assets/report1.png'),
         require('@/assets/report2.png'),
-        require('@/assets/report3.png'),
+        // require('@/assets/report3.png'),
       ],
       ocrType: 'common',
       tableOCR: [
